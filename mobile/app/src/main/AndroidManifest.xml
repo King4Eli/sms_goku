@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-feature android:name="android.hardware.telephony" android:required="true" />
+
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_sms"
+        android:label="@string/app_name">
+
+        <!-- Exported for adb shell; SmsProvider rejects non-shell/root callers. -->
+        <provider
+            android:name=".SmsProvider"
+            android:authorities="com.smsgoku.gateway"
+            android:exported="true" />
+    </application>
+</manifest>

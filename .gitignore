@@ -1,8 +1,8 @@
-# Real credentials - never commit
-.env/
-api/.env
-
-node_modules/
-npm-debug.log*
-
-.DS_Store
+.app.env/*.env
+__pycache__/
+*.pyc
+mobile/.gradle/
+mobile/build/
+mobile/app/build/
+mobile/local.properties
+*.apk

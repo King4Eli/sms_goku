@@ -1,24 +1,50 @@
-# Run with: docker compose --env-file ./.env/db.env up -d --build
-# (--env-file is required because DB credentials live in ./.env/db.env,
-# not the ./.env that Compose auto-loads — and ./.env here is a directory
-# anyway, which Compose silently ignores for auto-loading.)
-#
-# First run / after schema changes, apply migrations:
-#   docker compose run --rm api npm run migrate
+name: sms_goku
 
-services: 
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sms_goku_db
+    env_file: .app.env/db.env
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5442:5432"
+      - "10.50.0.2:5442:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [sms_goku]
+
   api:
     build: ./api
-    restart: unless-stopped
-    env_file:
-      - ./.env/db.env
-    ports:
-      - "3000:3000"
-
-  frontend:
-    build: ./frontend
-    restart: unless-stopped
-    ports:
-      - "8080:80"
+    container_name: sms_goku_api
+    env_file: [.app.env/db.env, .app.env/api.env]
     depends_on:
-      - api
+      db: { condition: service_healthy }
+    ports:
+      - "9160:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks: [sms_goku]
+
+  web:
+    build: ./web
+    container_name: sms_goku_web
+    depends_on: [api]
+    ports:
+      - "9161:80"
+    restart: unless-stopped
+    networks: [sms_goku]
+
+volumes:
+  db_data:
+
+networks:
+  sms_goku:

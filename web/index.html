@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMS Goku Simulator</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#1b1f24; --muted:#667085; --line:#e4e7ec; --accent:#2563eb;
+          --ok:#15803d; --warn:#b45309; --bad:#b91c1c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1115; --card:#171a21; --fg:#e6e8eb; --muted:#9aa3af; --line:#2a2f3a; --accent:#60a5fa;
+            --ok:#4ade80; --warn:#fbbf24; --bad:#f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  .card h2 { font-size:15px; margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px;
+                    background:var(--bg); color:var(--fg); font:inherit; }
+  textarea { min-height: 80px; resize: vertical; }
+  button { margin-top:12px; padding:8px 14px; border:0; border-radius:6px; background:var(--accent);
+           color:#fff; font:inherit; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row > * { flex: 1; }
+  #log { font: 12px/1.5 ui-monospace, monospace; color: var(--muted); max-height: 140px; overflow:auto;
+         white-space: pre-wrap; margin-top: 12px; }
+  table { width:100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  td.msg { max-width: 280px; overflow-wrap: anywhere; }
+  .table-wrap { overflow-x: auto; }
+  .st { font-weight: 600; }
+  .st.sent { color: var(--ok); } .st.queued, .st.sending { color: var(--warn); } .st.failed { color: var(--bad); }
+  .stats { display:flex; gap:16px; font-size:13px; color:var(--muted); margin-bottom:8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>SMS Goku Simulator</h1>
+  <p class="sub">Acts as a client app calling the public API with an API key. Messages are queued in the
+    database, picked up by the runner and sent through the Android gateway.</p>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Send one SMS</h2>
+      <label for="key">API key (X-API-Key)</label>
+      <input id="key" placeholder="sk_..." autocomplete="off">
+      <label for="to">To</label>
+      <input id="to" placeholder="+15551234567">
+      <label for="msg">Message</label>
+      <textarea id="msg" maxlength="1600">Hello from SMS Goku!</textarea>
+      <button id="send">Send</button>
+    </section>
+
+    <section class="card">
+      <h2>Simulate users</h2>
+      <p class="sub" style="margin:0">Fire a burst of requests from fake users with random numbers and texts.</p>
+      <div class="row">
+        <div><label for="count">Messages</label><input id="count" type="number" value="5" min="1" max="200"></div>
+        <div><label for="delay">Delay between (ms)</label><input id="delay" type="number" value="300" min="0"></div>
+      </div>
+      <label for="prefix">Number prefix (random digits appended)</label>
+      <input id="prefix" value="+1555">
+      <button id="burst">Start simulation</button>
+      <div id="log"></div>
+    </section>
+  </div>
+
+  <section class="card" style="margin-top:16px">
+    <div class="row" style="justify-content: space-between">
+      <h2 style="margin:0; flex:0 1 auto">Messages for this key</h2>
+      <button class="secondary" id="refresh" style="margin:0; flex:0 0 auto">Refresh</button>
+    </div>
+    <div class="stats" id="stats" style="margin-top:10px"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>To</th><th>Message</th><th>Status</th><th>Tries</th><th>Error</th><th>Created</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="7">Enter an API key to load messages.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+$("key").value = store.get("apiKey") || "";
+$("key").addEventListener("change", () => { store.set("apiKey", $("key").value.trim()); load(); });
+
+function log(line) {
+  const el = $("log");
+  el.textContent = `${new Date().toLocaleTimeString()} ${line}\n` + el.textContent;
+}
+
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method,
+    headers: { "X-API-Key": $("key").value.trim(), ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = data.detail;
+    throw new Error(Array.isArray(d) ? d.map((e) => e.msg).join("; ") : d || `HTTP ${r.status}`);
+  }
+  return data;
+}
+
+async function sendOne(to, message) {
+  const m = await api("POST", "/api/sms", { to, message });
+  log(`queued #${m.id} -> ${m.to}`);
+  return m;
+}
+
+$("send").onclick = async () => {
+  $("send").disabled = true;
+  try { await sendOne($("to").value, $("msg").value); load(); }
+  catch (e) { log(`error: ${e.message}`); alert(e.message); }
+  finally { $("send").disabled = false; }
+};
+
+const NAMES = ["Ana", "Ben", "Chen", "Dara", "Eli", "Femi", "Gus", "Hana", "Ivan", "Jade"];
+const TEXTS = ["Your code is {n}", "Order #{n} has shipped", "Hi from {u}!", "Reminder: appointment at {h}:00",
+               "{u} sent you {n} points", "Balance alert: ${n}"];
+const rnd = (a) => a[Math.floor(Math.random() * a.length)];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+$("burst").onclick = async () => {
+  const n = Math.min(200, Math.max(1, +$("count").value || 1));
+  const delay = Math.max(0, +$("delay").value || 0);
+  $("burst").disabled = true;
+  let ok = 0;
+  for (let i = 0; i < n; i++) {
+    const to = $("prefix").value + String(Math.floor(Math.random() * 1e7)).padStart(7, "0");
+    const text = rnd(TEXTS).replace("{n}", Math.floor(Math.random() * 999999))
+      .replace("{u}", rnd(NAMES)).replace("{h}", 8 + Math.floor(Math.random() * 10));
+    try { await sendOne(to, text); ok++; } catch (e) { log(`error: ${e.message}`); }
+    if (delay) await sleep(delay);
+  }
+  log(`simulation done: ${ok}/${n} queued`);
+  $("burst").disabled = false;
+  load();
+};
+
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+async function load() {
+  if (!$("key").value.trim()) return;
+  try {
+    const rows = await api("GET", "/api/sms?limit=100");
+    const counts = rows.reduce((a, m) => (a[m.status] = (a[m.status] || 0) + 1, a), {});
+    $("stats").innerHTML = ["queued", "sending", "sent", "failed"]
+      .map((s) => `<span>${s}: <b class="st ${s}">${counts[s] || 0}</b></span>`).join("");
+    $("rows").innerHTML = rows.length ? rows.map((m) => `<tr>
+      <td>${m.id}</td><td>${esc(m.to)}</td><td class="msg">${esc(m.message)}</td>
+      <td class="st ${m.status}">${m.status}</td><td>${m.attempts}</td><td>${esc(m.last_error)}</td>
+      <td>${new Date(m.created_at).toLocaleTimeString()}</td></tr>`).join("")
+      : `<tr><td colspan="7">No messages yet.</td></tr>`;
+  } catch (e) {
+    $("rows").innerHTML = `<tr><td colspan="7">${esc(e.message)}</td></tr>`;
+  }
+}
+
+$("refresh").onclick = load;
+load();
+setInterval(load, 3000);
+</script>
+</body>
+</html>
