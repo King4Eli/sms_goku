@@ -1,0 +1,9 @@
+cd headless
+./gradlew :app:assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell pm grant com.smsgoku.headless android.permission.SEND_SMS   # one time, no UI
+
+adb shell "am broadcast -f 0x00000020 \
+  -n com.smsgoku.headless/.SendSmsReceiver \
+  --es number '16505551234' \
+  --es message 'hello from adb'"

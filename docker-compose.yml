@@ -9,13 +9,13 @@ services:
       - ./.env/db.env
       - ./.env/admin.env
     ports:
-      - "10.50.0.1:9702:3000"
+      - "10.50.0.2:9002:3000"
 
   frontend:
     container_name: sms_justu_webui
     image: kingeli/sms_justu_webui:1.0.0
     restart: unless-stopped
     ports:
-      - "10.50.0.1:9701:80"
+      - "10.50.0.2:9001:80"
     depends_on:
       - api

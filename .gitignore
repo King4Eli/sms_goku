@@ -1,6 +1,4 @@
-# Real credentials - never commit
-.env/
-api/.env
+
 
 node_modules/
 npm-debug.log*
