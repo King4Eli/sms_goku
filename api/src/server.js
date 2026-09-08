@@ -22,6 +22,6 @@ app.use((err, req, res, _next) => {
 const port = 8080;
 // Start the server
 app.listen(port, () => {
-  console.log(`sms-processing-api listening on :${port}`);
+  console.log(`smsgoku-api listening on :${port}`);
 });
  

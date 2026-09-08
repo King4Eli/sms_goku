@@ -319,6 +319,7 @@ fun AdminApp() {
     if (showSettingsDialog) {
         SettingsDialog(
             initialBaseUrl = baseUrl,
+            initialToken = adminToken,
             backgroundSyncEnabled = backgroundSyncEnabled,
             onToggleBackgroundSync = { setBackgroundSync(!backgroundSyncEnabled) },
             pullEnabled = pullEnabled,
@@ -579,6 +580,7 @@ fun WorkerCard(
 @Composable
 fun SettingsDialog(
     initialBaseUrl: String,
+    initialToken: String,
     backgroundSyncEnabled: Boolean,
     onToggleBackgroundSync: () -> Unit,
     pullEnabled: Boolean,
@@ -597,10 +599,8 @@ fun SettingsDialog(
     val eligibleWorkers = workers.filter { it.revokedAt == null && it.isPublic }
     val selectedWorker = eligibleWorkers.find { it.id == selectedWorkerId }
 
-    // Never prefilled with the stored token - write-only. Saving anything,
-    // even just a new server URL, requires re-entering it (same value or a
-    // new one) since there's no way to tell "left blank" apart from "clear it".
-    var token by remember { mutableStateOf("") }
+    // Prefilled with the saved token so it's not re-entered every time.
+    var token by remember { mutableStateOf(initialToken) }
     val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as PowerManager }
     var ignoringBatteryOptimizations by remember {
         mutableStateOf(powerManager.isIgnoringBatteryOptimizations(context.packageName))
@@ -623,7 +623,7 @@ fun SettingsDialog(
                     value = token,
                     onValueChange = { token = it },
                     label = { Text("X-Admin-Token") },
-                    placeholder = { Text("Required to save (write-only)") },
+                    placeholder = { Text("Required") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),

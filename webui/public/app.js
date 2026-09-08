@@ -79,3 +79,31 @@ function showResult(el, ok, text) {
   el.className = ok ? "result ok" : "result err";
   el.textContent = text;
 }
+
+// Copy to clipboard. navigator.clipboard only exists in a secure context
+// (https / localhost); on a plain http:// LAN address it's undefined, so
+// fall back to a hidden textarea + execCommand. Returns a promise<boolean>.
+async function copyText(text) {
+  if (window.isSecureContext && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* fall through */
+    }
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}

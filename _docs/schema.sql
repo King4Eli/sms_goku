@@ -1,14 +1,6 @@
--- SMS Processing schema. This is the ONLY copy - the API reads and
--- executes this exact file on startup (api/src/db.js). Nothing in /api
--- duplicates or hardcodes any SQL. Statements are CREATE TABLE IF NOT
--- EXISTS plus a few additive ALTER TABLE ... ADD COLUMN migrations for
--- databases created before a column existed; re-running this file
--- against an already-migrated database (which is what happens on every
--- API startup) is a no-op - db.js swallows "already exists" / "duplicate
--- column" errors - and a plain SQL import against a fresh database works
--- too.
---
--- Requires MySQL 8.0.16+ (enforced CHECK constraints) and 8.0.1+ (SKIP LOCKED).
+-- SMSgoku schema - the ONLY copy. api/src/db.js runs it on every startup;
+-- all CREATE TABLE IF NOT EXISTS, so re-running is a no-op. Needs MySQL
+-- 8.0.16+ (CHECK) / 8.0.1+ (SKIP LOCKED).
 
 CREATE TABLE IF NOT EXISTS users (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -31,42 +23,23 @@ CREATE TABLE IF NOT EXISTS api_keys (
   CONSTRAINT fk_api_keys_user FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
--- Sender identities ("workers") a customer can pick as 'from' in POST
--- /sms - admin-managed only, see admin-api.md. Never assigned to a
--- specific customer ('is_public' is the only visibility control, see
--- userApi.js) and never issued a credential of their own - there's no
--- worker-facing auth, see the pull/report flow in admin-api.md, which
--- authenticates with the same shared admin token as everything else.
+-- Sender identities ("workers"), admin-managed only (admin-api.md). Not
+-- customer-scoped; is_public is the only visibility control. No worker
+-- credential - the shared admin token gates the pull/report flow.
 CREATE TABLE IF NOT EXISTS worker_tokens (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
-  phone_number VARCHAR(32) NOT NULL, -- E.164-normalized "from" number this worker sends as
-  is_public TINYINT(1) NOT NULL DEFAULT 0, -- 1 = customers can see/select this number (GET /numbers, POST /sms 'from')
-  -- SIM subscription id the registering device sends this worker's SMS
-  -- from, chosen in the mobileui "Register worker" dialog. NULL = the
-  -- device's default SMS SIM. Device-scoped by nature (a SIM enumerates
-  -- differently per device) - it's the binding for the one device that
-  -- holds this worker's SIM, and the app re-adopts it from here on sync.
-  sub_id INT NULL,
+  phone_number VARCHAR(32) NOT NULL, -- E.164 "from" number this worker sends as
+  is_public TINYINT(1) NOT NULL DEFAULT 0, -- 1 = shown in GET /numbers, usable as POST /sms 'from'
+  sub_id INT NULL, -- SIM subscription id the registering device sends from; NULL = its default SIM
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   revoked_at TIMESTAMP NULL,
-  -- A revoked worker's number frees up for reuse - uniqueness should only
-  -- apply among active workers, not the full history. MySQL has no
-  -- native partial/filtered unique index, so this generated column
-  -- collapses to NULL once revoked; UNIQUE indexes treat every NULL as
-  -- distinct, so any number of revoked rows (or one revoked + one fresh
-  -- active row) can share a phone_number, while two simultaneously
-  -- active rows still can't. All lookups that key off phone_number
-  -- already filter revoked_at IS NULL (see userApi.js), so they keep
-  -- resolving to at most one row.
+  -- NULL once revoked so a freed number can be reused; UNIQUE treats NULLs
+  -- as distinct, so at most one *active* row per phone_number.
   active_phone_number VARCHAR(32)
     GENERATED ALWAYS AS (CASE WHEN revoked_at IS NULL THEN phone_number END) VIRTUAL,
   UNIQUE KEY uq_worker_tokens_active_phone_number (active_phone_number)
 ) ENGINE=InnoDB;
-
--- Additive migration for databases created before sub_id existed. Errors
--- 1060 (duplicate column) / 1091 are swallowed by db.js once applied.
-ALTER TABLE worker_tokens ADD COLUMN sub_id INT NULL AFTER is_public;
 
 CREATE TABLE IF NOT EXISTS sms_queue (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

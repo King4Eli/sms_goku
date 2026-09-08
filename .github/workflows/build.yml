@@ -1,4 +1,4 @@
-name: Build release APK
+name: build
 
 on:
   push:
@@ -9,7 +9,57 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  # ---- Docker images -> GHCR + rg2.vintolab.com ---------------------------
+  images:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: api
+            context: .
+            file: ./api/Dockerfile
+          - name: webui
+            context: ./webui
+            file: ./webui/Dockerfile
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: slug
+        run: echo "v=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ steps.slug.outputs.v }}-${{ matrix.name }}
+            rg2.vintolab.com/sms_processing-${{ matrix.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # ---- signed release APK -> artifact -------------------------------------
+  apk:
     runs-on: ubuntu-latest
     environment: android-release
     env:
@@ -19,15 +69,15 @@ jobs:
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
           cache: gradle
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v5
         with:
           packages: "platforms;android-36"
 
@@ -43,7 +93,7 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon :app:assembleRelease
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: app-release
           path: mobileui/app/build/outputs/apk/release/*.apk

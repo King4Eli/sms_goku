@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Account · SMS Processing</title>
+    <title>Account · SMSgoku</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
     <header class="top">
       <div class="brand">
-        <div class="brand-name"><span class="dot"></span> SMS Processing</div>
+        <div class="brand-name"><span class="dot"></span> SMSgoku</div>
         <a id="auth-pill" class="auth-pill" href="account.html">Log in</a>
       </div>
     </header>
@@ -132,14 +132,14 @@
               result.hidden = false;
               result.className = "result ok";
               result.innerHTML = `Account created. Store this API key now, it will not be shown again:
-<div class="key-display"><span>${body.apiKey}</span><button type="button" id="copy-key">Copy</button></div>
+<div class="key-display"><span style="user-select:all">${body.apiKey}</span><button type="button" id="copy-key">Copy</button></div>
 <button type="button" class="secondary" id="continue-btn">Continue to your account</button>`;
               document
                 .getElementById("copy-key")
-                .addEventListener("click", (e) => {
-                  navigator.clipboard.writeText(body.apiKey);
-                  e.target.textContent = "Copied!";
-                  setTimeout(() => (e.target.textContent = "Copy"), 1500);
+                .addEventListener("click", async (e) => {
+                  const ok = await copyText(body.apiKey);
+                  e.target.textContent = ok ? "Copied!" : "Select it manually";
+                  setTimeout(() => (e.target.textContent = "Copy"), 2000);
                 });
               document
                 .getElementById("continue-btn")
