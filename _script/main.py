@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Host-side SMS worker: claim queued messages from the API, send via adb, report.
 
-Worker id is read off the device (app SharedPreferences via `adb run-as`); set
-env WORKER_ID only to pin it. Other config in _script/.env (env vars override):
-PULLING_SERVER, ADMIN_TOKEN (required); PULL_INTERVAL (6.7), PULL_LIMIT (20),
-PKG (com.smsgoku.app), ADB_SERIAL (optional).
+All config comes from _script/.env (or matching environment variables, which
+win). Nothing is hardcoded. The worker id is not configured - each poll it is
+read live off the device (the app's registered worker, via `adb run-as`).
 
-    python main.py --start | --once | --check
+    python main.py --start | --check
 """
 
 from __future__ import annotations
@@ -24,10 +23,16 @@ import urllib.error
 import urllib.request
 
 ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-DEFAULT_PKG = "com.smsgoku.app"
-DEFAULT_INTERVAL = 6.7
-DEFAULT_PULL_LIMIT = 20
-BROADCAST_FLAG = "0x00000020"  # FLAG_INCLUDE_STOPPED_PACKAGES
+
+# Config keys read from .env / env. Required must be non-empty; optional may be
+# absent or blank. No defaults live here - .env is the single source.
+REQUIRED = (
+    "PULLING_SERVER", "ADMIN_TOKEN", "API_PREFIX", "PKG", "PREFS_FILE",
+    "ADB_BIN", "BROADCAST_FLAG", "PULL_INTERVAL", "PULL_LIMIT",
+    "HTTP_TIMEOUT", "ADB_TIMEOUT", "SLEEP_GRANULARITY",
+)
+OPTIONAL = ("ADB_SERIAL",)
+
 RESULT_RE = re.compile(r"result=(-?\d+)")
 DATA_RE = re.compile(r'data="([^"]*)"')
 PREFS_WORKER_RE = re.compile(r'name="worker_id"\s+value="(\d+)"')
@@ -64,11 +69,11 @@ def load_env(path: str) -> dict:
     return values
 
 
-def device_worker_id(adb_base: list[str], package: str) -> int | None:
-    prefs = f"/data/data/{package}/shared_prefs/admin_settings.xml"
-    cmd = adb_base + ["shell", "run-as", package, "cat", prefs]
+def device_worker_id(cfg: "Config") -> int | None:
+    prefs = f"/data/data/{cfg.pkg}/shared_prefs/{cfg.prefs_file}"
+    cmd = cfg.adb_base + ["shell", "run-as", cfg.pkg, "cat", prefs]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=cfg.adb_timeout)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     if proc.returncode != 0:
@@ -78,68 +83,55 @@ def device_worker_id(adb_base: list[str], package: str) -> int | None:
 
 
 class Config:
-    def __init__(self, env: dict):
-        def get(k: str, default: str | None = None) -> str | None:
-            v = os.environ.get(k)
-            if v is None:
-                v = env.get(k)
-            return v if v not in (None, "") else default
+    def __init__(self, env: dict, env_path: str = ENV_PATH):
+        merged = {k: os.environ.get(k, env.get(k, "")).strip()
+                  for k in REQUIRED + OPTIONAL}
 
-        self.api_base = (get("PULLING_SERVER") or "").rstrip("/")
-        self.admin_token = get("ADMIN_TOKEN") or ""
-        self.package = get("PKG", DEFAULT_PKG)
-        self.adb_serial = get("ADB_SERIAL")
-        self.adb_base = ["adb"] + (["-s", self.adb_serial] if self.adb_serial else [])
-
-        try:
-            self.interval = float(get("PULL_INTERVAL", str(DEFAULT_INTERVAL)))
-        except ValueError:
-            raise SystemExit(f"PULL_INTERVAL must be a number, got {get('PULL_INTERVAL')!r}")
-        try:
-            self.pull_limit = int(get("PULL_LIMIT", str(DEFAULT_PULL_LIMIT)))
-        except ValueError:
-            raise SystemExit(f"PULL_LIMIT must be an integer, got {get('PULL_LIMIT')!r}")
-
-        missing = [k for k, v in (("PULLING_SERVER", self.api_base),
-                                  ("ADMIN_TOKEN", self.admin_token)) if not v]
+        missing = [k for k in REQUIRED if not merged[k]]
         if missing:
-            raise SystemExit(f"missing required config in {ENV_PATH} (or env): "
+            raise SystemExit(f"missing required config in {env_path} (or env): "
                              + ", ".join(missing))
 
-        worker_id = get("WORKER_ID")
-        if worker_id not in (None, ""):
+        def num(key, cast):
             try:
-                self.worker_id = int(worker_id)
+                return cast(merged[key])
             except ValueError:
-                raise SystemExit(f"WORKER_ID must be an integer, got {worker_id!r}")
-            self.worker_id_source = "config"
-        else:
-            wid = device_worker_id(self.adb_base, self.package)
-            if wid is None:
-                raise SystemExit(
-                    "WORKER_ID not set and none found on the device - register a "
-                    f"worker in the app first, or set WORKER_ID env. "
-                    f"({' '.join(self.adb_base)} run-as {self.package})")
-            self.worker_id = wid
-            self.worker_id_source = "device"
+                raise SystemExit(f"{key} must be {cast.__name__}, got {merged[key]!r}")
+
+        self.api_base = merged["PULLING_SERVER"].rstrip("/")
+        self.api_prefix = "/" + merged["API_PREFIX"].strip("/")
+        self.admin_token = merged["ADMIN_TOKEN"]
+        self.pkg = merged["PKG"]
+        self.prefs_file = merged["PREFS_FILE"]
+        self.broadcast_flag = merged["BROADCAST_FLAG"]
+        self.interval = num("PULL_INTERVAL", float)
+        self.pull_limit = num("PULL_LIMIT", int)
+        self.http_timeout = num("HTTP_TIMEOUT", float)
+        self.adb_timeout = num("ADB_TIMEOUT", float)
+        self.sleep_granularity = num("SLEEP_GRANULARITY", float)
+        self.adb_base = [merged["ADB_BIN"]] + (
+            ["-s", merged["ADB_SERIAL"]] if merged["ADB_SERIAL"] else [])
 
         if self.interval <= 0:
             raise SystemExit("PULL_INTERVAL must be > 0")
+
+    def url(self, path: str) -> str:
+        return f"{self.api_base}{self.api_prefix}{path}"
 
 
 class ApiError(RuntimeError):
     pass
 
 
-def _request(method: str, url: str, token: str, body: dict | None = None) -> tuple[int, object]:
+def _request(cfg: Config, method: str, url: str, body: dict | None = None) -> tuple[int, object]:
     data = None
-    headers = {"X-Admin-Token": token}
+    headers = {"X-Admin-Token": cfg.admin_token}
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=cfg.http_timeout) as resp:
             raw = resp.read()
             return resp.status, (json.loads(raw) if raw else None)
     except urllib.error.HTTPError as e:
@@ -154,25 +146,24 @@ def _request(method: str, url: str, token: str, body: dict | None = None) -> tup
 
 
 def list_workers(cfg: Config) -> list[dict]:
-    status, payload = _request("GET", f"{cfg.api_base}/api/v1/admin/workers", cfg.admin_token)
+    status, payload = _request(cfg, "GET", cfg.url("/admin/workers"))
     if status != 200:
         raise ApiError(f"workers -> {status}: {payload}")
     return payload or []
 
 
-def pull_pending(cfg: Config) -> list[dict]:
+def pull_pending(cfg: Config, worker_id: int) -> list[dict]:
     # GET /admin/sms/pending claims the rows it returns (status 0 -> 2).
-    url = (f"{cfg.api_base}/api/v1/admin/sms/pending"
-           f"?workerId={cfg.worker_id}&limit={cfg.pull_limit}")
-    status, payload = _request("GET", url, cfg.admin_token)
+    url = cfg.url(f"/admin/sms/pending?workerId={worker_id}&limit={cfg.pull_limit}")
+    status, payload = _request(cfg, "GET", url)
     if status != 200:
         raise ApiError(f"pending -> {status}: {payload}")
     return payload or []
 
 
 def report(cfg: Config, msg_id: int, error: str | None) -> None:
-    url = f"{cfg.api_base}/api/v1/admin/sms/{msg_id}/report"
-    status, payload = _request("PATCH", url, cfg.admin_token, {"error": error})
+    status, payload = _request(cfg, "PATCH", cfg.url(f"/admin/sms/{msg_id}/report"),
+                               {"error": error})
     if status in (200, 409):
         if status == 409:
             log(f"  msg {msg_id}: already reported (409), skipping")
@@ -181,13 +172,13 @@ def report(cfg: Config, msg_id: int, error: str | None) -> None:
 
 
 def send_sms(cfg: Config, number: str, message: str) -> tuple[bool, str]:
-    inner = (f"am broadcast -f {BROADCAST_FLAG} -n {cfg.package}/.SendSmsReceiver "
+    inner = (f"am broadcast -f {cfg.broadcast_flag} -n {cfg.pkg}/.SendSmsReceiver "
              f"--es number {shlex.quote(number)} --es message {shlex.quote(message)}")
     try:
         proc = subprocess.run(cfg.adb_base + ["shell", inner],
-                              capture_output=True, text=True, timeout=30)
+                              capture_output=True, text=True, timeout=cfg.adb_timeout)
     except FileNotFoundError:
-        return False, "adb not found on PATH"
+        return False, f"{cfg.adb_base[0]} not found on PATH"
     except subprocess.TimeoutExpired:
         return False, "adb broadcast timed out"
 
@@ -203,14 +194,18 @@ def send_sms(cfg: Config, number: str, message: str) -> tuple[bool, str]:
 
 
 def process_once(cfg: Config) -> None:
+    worker_id = device_worker_id(cfg)
+    if worker_id is None:
+        log("no worker registered on the device - register one in the app; skipping")
+        return
     try:
-        msgs = pull_pending(cfg)
+        msgs = pull_pending(cfg, worker_id)
     except ApiError as e:
         log(f"pull failed: {e}")
         return
     if not msgs:
         return
-    log(f"claimed {len(msgs)} message(s)")
+    log(f"worker {worker_id}: claimed {len(msgs)} message(s)")
     for msg in msgs:
         mid, to, text = msg["id"], msg["to"], msg["message"]
         ok, detail = send_sms(cfg, to, text)
@@ -224,34 +219,41 @@ def process_once(cfg: Config) -> None:
 def run_loop(cfg: Config) -> None:
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
-    log(f"polling {cfg.api_base} for worker {cfg.worker_id} (from {cfg.worker_id_source}) "
-        f"every {cfg.interval}s (adb: {' '.join(cfg.adb_base)}, pkg: {cfg.package})")
+    log(f"polling {cfg.api_base} every {cfg.interval}s "
+        f"(adb: {' '.join(cfg.adb_base)}, pkg: {cfg.pkg}) - worker id read from device each cycle")
     while not _stop:
         started = time.monotonic()
         process_once(cfg)
         sleep_for = cfg.interval - (time.monotonic() - started)
         while sleep_for > 0 and not _stop:
-            time.sleep(min(sleep_for, 0.5))
-            sleep_for -= 0.5
+            time.sleep(min(sleep_for, cfg.sleep_granularity))
+            sleep_for -= cfg.sleep_granularity
     log("stopped")
 
 
 def run_check(cfg: Config) -> int:
-    log(f"config OK - server {cfg.api_base}, worker {cfg.worker_id} "
-        f"(from {cfg.worker_id_source}), interval {cfg.interval}s, pkg {cfg.package}")
+    log(f"config OK - server {cfg.api_base}, interval {cfg.interval}s, pkg {cfg.pkg}")
     ok = True
+    worker_id = device_worker_id(cfg)
+    if worker_id is None:
+        log("device worker: NONE - register a worker in the app")
+        ok = False
+    else:
+        log(f"device worker: {worker_id}")
     try:
         workers = list_workers(cfg)
-        mine = next((w for w in workers if w.get("id") == cfg.worker_id), None)
-        log(f"API reachable - {len(workers)} worker(s); worker {cfg.worker_id} "
-            + (f"found: {mine.get('name')} ({mine.get('phone')})" if mine else "NOT in list"))
-        ok = mine is not None
+        mine = next((w for w in workers if w.get("id") == worker_id), None)
+        log(f"API reachable - {len(workers)} worker(s); "
+            + (f"worker {worker_id} found: {mine.get('name')} ({mine.get('phone')})"
+               if mine else f"worker {worker_id} NOT in list"))
+        if worker_id is not None and mine is None:
+            ok = False
     except ApiError as e:
         log(f"API check FAILED: {e}")
         ok = False
     try:
         proc = subprocess.run(cfg.adb_base + ["get-state"],
-                              capture_output=True, text=True, timeout=10)
+                              capture_output=True, text=True, timeout=cfg.adb_timeout)
         state = (proc.stdout or proc.stderr).strip()
         if proc.returncode == 0 and state == "device":
             log("adb device: connected")
@@ -259,7 +261,7 @@ def run_check(cfg: Config) -> int:
             log(f"adb device check FAILED: {state or 'no device'}")
             ok = False
     except FileNotFoundError:
-        log("adb device check FAILED: adb not found on PATH")
+        log(f"adb device check FAILED: {cfg.adb_base[0]} not found on PATH")
         ok = False
     except subprocess.TimeoutExpired:
         log("adb device check FAILED: timed out")
@@ -272,17 +274,13 @@ def main(argv: list[str]) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--start", action="store_true", help="run the poll loop")
-    mode.add_argument("--once", action="store_true", help="one poll cycle, then exit")
     mode.add_argument("--check", action="store_true", help="validate config + reachability")
     p.add_argument("--env", default=ENV_PATH, help=f"path to .env (default: {ENV_PATH})")
     args = p.parse_args(argv)
 
-    cfg = Config(load_env(args.env))
+    cfg = Config(load_env(args.env), args.env)
     if args.check:
         return run_check(cfg)
-    if args.once:
-        process_once(cfg)
-        return 0
     run_loop(cfg)
     return 0
 

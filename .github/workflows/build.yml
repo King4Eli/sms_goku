@@ -1,0 +1,49 @@
+name: Build release APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-36"
+
+      - name: Decode release keystore
+        run: |
+          [ -n "$KEYSTORE_BASE64" ] || { echo "::error::set the KEYSTORE_BASE64 / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD repo secrets"; exit 1; }
+          echo "$KEYSTORE_BASE64" | base64 -d > mobileui/release.jks
+          echo "KEYSTORE_FILE=release.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        working-directory: mobileui
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: mobileui/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

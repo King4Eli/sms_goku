@@ -1,79 +1,42 @@
-# SMS Processing API
+# API
 
-Base URL: `/api/v1`. Implementation: `api/src/userApi.js`,
-`api/src/adminApi.js`.
+Base `/api/v1`. Impl: `api/src/userApi.js`, `api/src/adminApi.js`.
+Admin routes: [`admin-api.md`](./admin-api.md).
 
 ## Auth
 
-| Audience | Header | Table |
+| Audience | Header | Store |
 |---|---|---|
-| Customer | `X-Api-Key: <key>` | `api_keys` |
-| Admin | `X-Admin-Token: <token>` | none — static secret, `.env/admin.env` |
+| Customer | `X-Api-Key` | `api_keys` |
+| Admin | `X-Admin-Token` | static secret, `.env/admin.env` |
 
-Separate credential spaces — one type never authenticates another's
-routes. Workers are never self-service: a customer can select an
-available worker as `from`, but only an admin can create, list, or
-revoke one. See [`admin-api.md`](./admin-api.md).
+Separate credential spaces; neither authenticates the other's routes.
 
 ## `POST /users/token`
 
-Open, no auth, no rate limit. Body: `{ email, phone, label? }`.
+Open, no rate limit. Body `{ email, phone, label? }`.
+- `email` required, HTML5 pattern.
+- `phone` required, E.164 via `libphonenumber-js`; `country` derived.
+- Existing email → updates that user, no duplicate.
 
-- `email` — required, validated (HTML5-spec pattern).
-- `phone` — required, international format (`+` + country code). Validated
-  with `libphonenumber-js`, normalized to E.164, `country` (ISO 3166-1
-  alpha-2) derived from it.
-- Existing email → updates `phone_number`/`country` on that user, doesn't duplicate.
-
-`201`: `{ id, userId, email, phone, country, label, apiKey }` (`apiKey` shown once).
+`201 { id, userId, email, phone, country, label, apiKey }` — `apiKey` shown once (only SHA-256 stored).
 
 ## `GET /numbers`
 
-Auth: customer. Lists `worker_tokens` where `revoked_at IS NULL AND
-is_public = 1` — workers are never assigned to a specific customer, so
-this is every shared public number and nothing else; a private worker
-never appears here for anyone.
+Auth: customer. `worker_tokens` where `revoked_at IS NULL AND is_public = 1`.
 
-`200`: `[{ "id": 7, "phone": "+15551234567" }, ...]` — `id` is what
-`POST /sms`'s `from` expects (see below), `phone` is display-only.
+`200 [{ id, phone }, ...]` — `id` is what `POST /sms` `from` wants; `phone` display-only.
 
 ## `POST /sms`
 
-Auth: customer. Body: `{ to, from, message }`.
+Auth: customer. Body `{ to, from, message }`.
+- `to` — validated/normalized like `phone` above.
+- `from` — worker `id` (int) from `GET /numbers`, not a phone number. Must be active + public, else `400`.
 
-- `to` — validated/normalized like `phone` in `/users/token`.
-- `from` — a worker `id` from `GET /numbers` (integer, **not** a phone
-  number). A phone number alone can't uniquely identify a worker once
-  revoked numbers become reusable (see `admin-api.md`), so the id is the
-  only stable reference. Must resolve to an active, public worker —
-  otherwise `400`.
+Rate limit: `api_keys.daily_sms_limit` (default 10) per rolling 24h, counted from `sms_queue`. `429` over.
 
-Rate limit: `api_keys.daily_sms_limit` (default `10`) per rolling 24h,
-counted from `sms_queue` directly — see Rate limiting below. `429` if exceeded.
-
-`201`: `{ id, to, from, message, status: 0 }` — `from` echoes back the
-worker id, not a phone number. `status` starts at `0` (queued); a
-worker device pulls and sends it from there — see "Worker device flow"
-in [`admin-api.md`](./admin-api.md).
+`201 { id, to, from, message, status: 0 }`. Worker device pulls from `status 0` — see [`admin-api.md`](./admin-api.md).
 
 ## Rate limiting
 
-Only `/sms` is limited, by `api_keys.daily_sms_limit` — read fresh per
-request, not a code constant. Change it live:
-
-```sql
-UPDATE api_keys SET daily_sms_limit = ? WHERE id = ?;
-```
-
-Nothing else (`/users/token`, `/numbers`) is rate limited.
-
-## Credentials
-
-| Type | How | Auth |
-|---|---|---|
-| API key | `POST /users/token` | none — self-service |
-| Worker (sender identity) | `POST /admin/workers` | admin — `X-Admin-Token` |
-
-A customer can never create, list, or revoke a worker themselves — see
-[`admin-api.md`](./admin-api.md). The API key is shown once; only its
-SHA-256 hash is stored (`api_keys.key_hash`).
+Only `/sms`, by `api_keys.daily_sms_limit` (read live): `UPDATE api_keys SET daily_sms_limit = ? WHERE id = ?`.

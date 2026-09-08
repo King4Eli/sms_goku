@@ -1,6 +1,9 @@
-
-
 node_modules/
 npm-debug.log*
 
 .DS_Store
+
+# signing material - never commit
+*.jks
+*.keystore
+keystore.properties

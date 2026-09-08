@@ -1,8 +1,19 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Release signing config from env vars (CI) or mobileui/keystore.properties
+// (local). Both gitignored. If nothing is set, release builds stay unsigned.
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun signingValue(key: String): String? =
+    System.getenv(key) ?: keystoreProps.getProperty(key)
 
 android {
     namespace = "com.smsgoku.app"
@@ -20,6 +31,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            signingValue("KEYSTORE_FILE")?.let { path ->
+                storeFile = rootProject.file(path)
+                storePassword = signingValue("KEYSTORE_PASSWORD")
+                keyAlias = signingValue("KEY_ALIAS")
+                keyPassword = signingValue("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -27,6 +49,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
+                .takeIf { it.storeFile?.exists() == true }
         }
     }
     compileOptions {
