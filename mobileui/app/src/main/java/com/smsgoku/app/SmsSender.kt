@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import android.app.Activity
 import android.app.PendingIntent
@@ -11,24 +11,19 @@ import android.telephony.SmsManager
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Sends SMS on the device's default SIM - see multi-SIM discussion in
- *  worker-mobile.md for why picking a specific SIM isn't done (yet). */
+/** Sends SMS on the SIM chosen in Settings (`Settings.subId`), passed in as
+ *  [subId]; [Settings.DEFAULT_SUB_ID] falls back to the system default SIM. */
 object SmsSender {
-    private const val ACTION_SMS_SENT = "com.smsjustu.app.action.SMS_SENT"
+    private const val ACTION_SMS_SENT = "com.smsgoku.app.action.SMS_SENT"
 
-    /** Sends [message] to [to], splitting into multiple parts if it exceeds a
-     *  single SMS segment. Returns null on success, or a description of the
-     *  first part that failed. [id] only needs to be unique among sends
+    /** Sends [message] to [to] on [subId], splitting into multiple parts if it
+     *  exceeds a single SMS segment. Returns null on success, or a description
+     *  of the first part that failed. [id] only needs to be unique among sends
      *  in flight at once - it seeds the broadcast/PendingIntent identity. */
-    suspend fun send(context: Context, id: Long, to: String, message: String): String? =
+    suspend fun send(context: Context, id: Long, to: String, message: String, subId: Int): String? =
         suspendCancellableCoroutine { cont ->
             val appContext = context.applicationContext
-            val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                appContext.getSystemService(SmsManager::class.java)
-            } else {
-                @Suppress("DEPRECATION")
-                SmsManager.getDefault()
-            }
+            val smsManager = smsManagerFor(appContext, subId)
 
             val parts = smsManager.divideMessage(message)
             val remaining = AtomicInteger(parts.size)

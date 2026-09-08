@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import java.text.SimpleDateFormat
 import java.util.Date

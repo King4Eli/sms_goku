@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import android.Manifest
 import android.app.NotificationChannel
@@ -74,7 +74,7 @@ class SyncService : Service() {
             } else {
                 val powerManager = getSystemService(POWER_SERVICE) as PowerManager
                 val wakeLock = powerManager.newWakeLock(
-                    PowerManager.PARTIAL_WAKE_LOCK, "smsjustu:sync"
+                    PowerManager.PARTIAL_WAKE_LOCK, "smsgoku:sync"
                 )
                 try {
                     wakeLock.acquire(30_000)
@@ -84,8 +84,13 @@ class SyncService : Service() {
                     EventLog.recordPull(this@SyncService, workers.size)
 
                     val workerId = settings.workerId
-                    if (workerId != null && hasSendSmsPermission()) {
-                        drainPendingSms(client, workerId)
+                    if (workerId != null) {
+                        // worker_tokens.sub_id is authoritative - keep the local
+                        // cache (used by both send paths) in step with it.
+                        val recordSubId = workers.find { it.id == workerId }?.subId
+                            ?: Settings.DEFAULT_SUB_ID
+                        if (recordSubId != settings.subId) settings.subId = recordSubId
+                        if (hasSendSmsPermission()) drainPendingSms(client, workerId)
                     }
 
                     notify("$active active worker(s) · last synced ${timeNow()} · ${statsLine()}")
@@ -101,7 +106,7 @@ class SyncService : Service() {
     }
 
     /** Claims and sends whatever's queued for [workerId], one at a time, via
-     *  the device's default SIM - see SmsSender. Each message is reported
+     *  the SIM chosen in Settings - see SmsSender. Each message is reported
      *  back (success or failure) regardless of send outcome, so it doesn't
      *  stay claimed server-side forever; a failed *report* (network blip
      *  right after a successful send) is swallowed since the send itself
@@ -109,8 +114,9 @@ class SyncService : Service() {
     private suspend fun drainPendingSms(client: AdminApiClient, workerId: Long) {
         try {
             val pending = client.pullPendingSms(workerId)
+            val subId = settings.subId
             for (sms in pending) {
-                val error = SmsSender.send(this@SyncService, sms.id, sms.to, sms.message)
+                val error = SmsSender.send(this@SyncService, sms.id, sms.to, sms.message, subId)
                 runCatching { client.reportSmsResult(sms.id, error) }
                 if (error == null) {
                     EventLog.add(this@SyncService, EventType.SENT, "Sent to ${sms.to}", workerId)
@@ -150,7 +156,7 @@ class SyncService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("smsJustu sync")
+            .setContentTitle("smsGoku sync")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setOngoing(true)

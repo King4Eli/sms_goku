@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import org.junit.Test
 

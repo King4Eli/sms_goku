@@ -1,4 +1,4 @@
-package com.smsjustu.app.ui.theme
+package com.smsgoku.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

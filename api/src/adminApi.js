@@ -48,7 +48,7 @@ router.use("/admin", adminAuth);
 router.post(
   "/admin/workers",
   wrap(async (req, res) => {
-    const { name, phone, public: isPublicInput } = req.body || {};
+    const { name, phone, public: isPublicInput, subId: subIdInput } = req.body || {};
     if (typeof name !== "string" || name.trim() === "") {
       return res.status(400).json({ error: "'name' is required" });
     }
@@ -61,16 +61,29 @@ router.post(
     }
     const isPublic = Boolean(isPublicInput);
 
+    // SIM subscription id the registering device sends this worker from.
+    // Optional: absent / null / negative all mean "device default SIM".
+    let subId = null;
+    if (subIdInput !== undefined && subIdInput !== null) {
+      if (!Number.isInteger(subIdInput) || subIdInput < 0) {
+        return res
+          .status(400)
+          .json({ error: "'subId' must be a non-negative integer if present" });
+      }
+      subId = subIdInput;
+    }
+
     try {
       const [result] = await pool.query(
-        `INSERT INTO worker_tokens (name, phone_number, is_public) VALUES (?, ?, ?)`,
-        [name.trim(), parsedPhone.e164, isPublic ? 1 : 0],
+        `INSERT INTO worker_tokens (name, phone_number, is_public, sub_id) VALUES (?, ?, ?, ?)`,
+        [name.trim(), parsedPhone.e164, isPublic ? 1 : 0, subId],
       );
       res.status(201).json({
         id: result.insertId,
         name: name.trim(),
         phone: parsedPhone.e164,
         isPublic,
+        subId,
       });
     } catch (err) {
       if (err.errno === 1062) {
@@ -88,7 +101,7 @@ router.get(
   "/admin/workers",
   wrap(async (req, res) => {
     const [rows] = await pool.query(
-      `SELECT id, name, phone_number, is_public, created_at, revoked_at
+      `SELECT id, name, phone_number, is_public, sub_id, created_at, revoked_at
      FROM worker_tokens ORDER BY created_at DESC`,
     );
     res.status(200).json(
@@ -97,6 +110,7 @@ router.get(
         name: r.name,
         phone: r.phone_number,
         isPublic: Boolean(r.is_public),
+        subId: r.sub_id === null ? null : Number(r.sub_id),
         createdAt: r.created_at,
         revokedAt: r.revoked_at,
       })),

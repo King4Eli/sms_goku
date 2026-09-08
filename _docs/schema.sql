@@ -1,9 +1,12 @@
 -- SMS Processing schema. This is the ONLY copy - the API reads and
 -- executes this exact file on startup (api/src/db.js). Nothing in /api
--- duplicates or hardcodes any SQL. Every statement is CREATE TABLE IF
--- NOT EXISTS - re-running this file against an already-migrated
--- database (which is what happens on every API startup) is a no-op, and
--- a plain SQL import against a fresh database works too.
+-- duplicates or hardcodes any SQL. Statements are CREATE TABLE IF NOT
+-- EXISTS plus a few additive ALTER TABLE ... ADD COLUMN migrations for
+-- databases created before a column existed; re-running this file
+-- against an already-migrated database (which is what happens on every
+-- API startup) is a no-op - db.js swallows "already exists" / "duplicate
+-- column" errors - and a plain SQL import against a fresh database works
+-- too.
 --
 -- Requires MySQL 8.0.16+ (enforced CHECK constraints) and 8.0.1+ (SKIP LOCKED).
 
@@ -39,6 +42,12 @@ CREATE TABLE IF NOT EXISTS worker_tokens (
   name VARCHAR(255) NOT NULL,
   phone_number VARCHAR(32) NOT NULL, -- E.164-normalized "from" number this worker sends as
   is_public TINYINT(1) NOT NULL DEFAULT 0, -- 1 = customers can see/select this number (GET /numbers, POST /sms 'from')
+  -- SIM subscription id the registering device sends this worker's SMS
+  -- from, chosen in the mobileui "Register worker" dialog. NULL = the
+  -- device's default SMS SIM. Device-scoped by nature (a SIM enumerates
+  -- differently per device) - it's the binding for the one device that
+  -- holds this worker's SIM, and the app re-adopts it from here on sync.
+  sub_id INT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   revoked_at TIMESTAMP NULL,
   -- A revoked worker's number frees up for reuse - uniqueness should only
@@ -54,6 +63,10 @@ CREATE TABLE IF NOT EXISTS worker_tokens (
     GENERATED ALWAYS AS (CASE WHEN revoked_at IS NULL THEN phone_number END) VIRTUAL,
   UNIQUE KEY uq_worker_tokens_active_phone_number (active_phone_number)
 ) ENGINE=InnoDB;
+
+-- Additive migration for databases created before sub_id existed. Errors
+-- 1060 (duplicate column) / 1091 are swallowed by db.js once applied.
+ALTER TABLE worker_tokens ADD COLUMN sub_id INT NULL AFTER is_public;
 
 CREATE TABLE IF NOT EXISTS sms_queue (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

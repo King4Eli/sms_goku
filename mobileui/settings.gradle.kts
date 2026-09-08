@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "smsJustu"
+rootProject.name = "smsGoku"
 include(":app")

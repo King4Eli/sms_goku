@@ -8,9 +8,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- To list the device's SIMs in Settings ("SIM to send from"). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
     <application
-        android:name=".SmsJustuApplication"
+        android:name=".SmsGokuApplication"
         android:usesCleartextTraffic="true"
 
         android:allowBackup="true"
@@ -20,12 +22,12 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.SmsJustu">
+        android:theme="@style/Theme.SmsGoku">
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.SmsJustu">
+            android:theme="@style/Theme.SmsGoku">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -49,12 +51,12 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="com.smsjustu.app.action.RESTART_SYNC" />
+                <action android:name="com.smsgoku.app.action.RESTART_SYNC" />
             </intent-filter>
         </receiver>
 
         <!-- adb-triggerable one-shot SMS send, for host-script control over adb.
-             Fired via: adb shell am broadcast -n com.smsjustu.app/.SendSmsReceiver ...
+             Fired via: adb shell am broadcast -n com.smsgoku.app/.SendSmsReceiver ...
              exported but gated by SEND_SMS, so only the adb shell user / system can call it. -->
         <receiver
             android:name=".SendSmsReceiver"

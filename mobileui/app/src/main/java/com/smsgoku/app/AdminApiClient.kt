@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -16,6 +16,8 @@ data class Worker(
     val name: String,
     val phone: String,
     val isPublic: Boolean,
+    /** SIM subscription id this worker sends from; null = device default SIM. */
+    val subId: Int?,
     val createdAt: String?,
     val revokedAt: String?
 )
@@ -24,7 +26,8 @@ data class CreatedWorker(
     val id: Long,
     val name: String,
     val phone: String,
-    val isPublic: Boolean
+    val isPublic: Boolean,
+    val subId: Int?
 )
 
 data class PendingSms(
@@ -104,17 +107,25 @@ class AdminApiClient(private val baseUrl: String, private val adminToken: String
                 name = o.getString("name"),
                 phone = o.getString("phone"),
                 isPublic = o.getBoolean("isPublic"),
+                subId = if (o.isNull("subId")) null else o.getInt("subId"),
                 createdAt = if (o.isNull("createdAt")) null else o.optString("createdAt"),
                 revokedAt = if (o.isNull("revokedAt")) null else o.optString("revokedAt")
             )
         }
     }
 
-    suspend fun createWorker(name: String, phone: String, isPublic: Boolean): CreatedWorker {
+    /** [subId] null = let the device use its default SMS SIM. */
+    suspend fun createWorker(
+        name: String,
+        phone: String,
+        isPublic: Boolean,
+        subId: Int?
+    ): CreatedWorker {
         val payload = JSONObject().apply {
             put("name", name)
             put("phone", phone)
             put("public", isPublic)
+            if (subId != null) put("subId", subId)
         }
         val o = request("POST", "/api/v1/admin/workers", payload)
             ?: throw AdminApiException("Empty response from server")
@@ -122,7 +133,8 @@ class AdminApiClient(private val baseUrl: String, private val adminToken: String
             id = o.getLong("id"),
             name = o.getString("name"),
             phone = o.getString("phone"),
-            isPublic = o.getBoolean("isPublic")
+            isPublic = o.getBoolean("isPublic"),
+            subId = if (o.isNull("subId")) null else o.getInt("subId")
         )
     }
 

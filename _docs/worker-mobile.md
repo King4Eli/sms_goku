@@ -1,7 +1,7 @@
-# smsJustu (mobile)
+# smsGoku (mobile)
 
 Android app at `mobileui/`. Package
-`com.smsjustu.app`, app label "smsJustu". A client for the
+`com.smsgoku.app`, app label "smsGoku". A client for the
 [Admin API](./admin-api.md): it manages worker records (sender
 identities customers can pick as `from`; create/list/revoke) and,
 if configured with a worker to send as, actually sends the queued
@@ -22,22 +22,28 @@ option here).
   `reportSmsResult`), `X-Admin-Token` on every request. Talks to the
   same admin routes documented in [`admin-api.md`](./admin-api.md).
 - `Settings.kt` — `SharedPreferences` wrapper: server URL, admin token,
-  pull toggle, background-sync toggle, the configured send-as
-  `workerId`. Nothing here is encrypted; the admin token is a static
-  shared secret with the same blast radius as putting it in
-  `.env/admin.env`, treat a device holding it accordingly.
+  pull toggle, background-sync toggle, the configured send-as `workerId`,
+  and `subId` (the SIM to send from). Nothing here is encrypted; the
+  admin token is a static shared secret with the same blast radius as
+  putting it in `.env/admin.env`, treat a device holding it accordingly.
+- `SimSupport.kt` — lists the device's active SIMs
+  (`SubscriptionManager`, needs `READ_PHONE_STATE`) for the "SIM to send
+  from" picker in the register-worker dialog; `simLabelFor(subId, sims)`
+  for the worker-list labels; and `smsManagerFor(context, subId)` — the
+  one place a `SmsManager` is bound to a subscription, shared by both
+  send paths.
 - `SyncService.kt`, `StartServiceReceiver.kt`, `RestartScheduler.kt`,
-  `SmsJustuApplication.kt` — the background-service machinery, see below.
-- `SmsSender.kt` — sends one message via `SmsManager` on the device's
-  default SIM, splitting into multipart if needed, and resolves once
-  every part's sent-broadcast has come back (success or a specific
-  `SmsManager.RESULT_ERROR_*`).
+  `SmsGokuApplication.kt` — the background-service machinery, see below.
+- `SmsSender.kt` — sends one message via `SmsManager` on the configured
+  SIM (`Settings.subId`, passed in), splitting into multipart if needed,
+  and resolves once every part's sent-broadcast has come back (success
+  or a specific `SmsManager.RESULT_ERROR_*`).
 - `SendSmsReceiver.kt` — an exported, `SEND_SMS`-gated `BroadcastReceiver`
   for one-shot sends driven by a host script over adb
-  (`am broadcast -n com.smsjustu.app/.SendSmsReceiver --es number … --es
-  message …`, optional `--ei subId <n>`). Independent of the sync loop:
-  it sends what it's handed and reports the outcome as the ordered-
-  broadcast result. Used by `_script/autoscript.py`; see
+  (`am broadcast -n com.smsgoku.app/.SendSmsReceiver --es number … --es
+  message …`). The SIM is `Settings.subId`, not a broadcast extra.
+  Independent of the sync loop: it sends what it's handed and reports the
+  outcome as the ordered-broadcast result. Used by `_script/main.py`; see
   [`how-to-headless.txt`](./how-to-headless.txt).
 
 ## Setup
@@ -62,7 +68,7 @@ Straight CRUD-ish mapping onto the admin routes:
 | Action | Route | UI |
 |---|---|---|
 | List | `GET /admin/workers` | main list, pull the refresh icon or reopen the app |
-| Create | `POST /admin/workers` | FAB → name / phone / public switch |
+| Create | `POST /admin/workers` | FAB → name / phone / public switch / SIM to send from (`subId` → `worker_tokens.sub_id`; binds this device on success) |
 | Revoke | `PATCH /admin/workers/:id/revoke` | per-card "Revoke" button → confirm dialog |
 
 Server-side validation errors (bad phone format, duplicate active
@@ -71,26 +77,43 @@ independent phone-number validation itself.
 
 ## Sending SMS
 
-Off by default — a device only sends once a worker is picked under
-"Send as worker" in Settings, which (a) persists `Settings.workerId`
-and (b) requests `SEND_SMS` at that point if not already granted.
-The picker only offers active, public workers, since those are the
-only ones `POST /sms` (see [`api.md`](./api.md)) will ever have queued
-anything against.
+Off by default. The SIM is chosen **when a worker is registered from
+this device** — the "Register worker" dialog (the `+` button) has a
+**"SIM to send from"** row: "Default SIM", or one of the device's active
+SIMs (listing them needs `READ_PHONE_STATE`, requested when the picker
+is first opened). `POST /admin/workers` carries the choice as `subId`
+and it lands on `worker_tokens.sub_id` — **that column is the source of
+truth for which SIM a worker uses**. On a successful create the app also
+persists `Settings.workerId` and `Settings.subId` locally and requests
+`SEND_SMS` — so registering a worker here means "this device now sends
+as that worker, on that SIM".
 
-**This is a manual, unverified binding** — Android has no reliable way
-for the app to read back "what's this SIM's own phone number" (carrier
-support for it is inconsistent and getting more locked down each
-release), so there's no way to confirm the picked worker's
-`phone_number` actually matches the device's SIM. Get it wrong and
-messages send fine, just from a number that isn't what the recipient
-expects. One worker per physical device/SIM is the only setup that
-makes sense here; multi-SIM (multiple workers on one device) isn't
-implemented — see the multi-SIM discussion this feature grew out of.
+`Settings.subId` is just a local cache of the record: every sync (and
+`refresh()`) re-adopts this device's worker's `sub_id` from the pulled
+worker list, so a change made elsewhere propagates. Both send paths
+(`SmsSender`, `SendSmsReceiver`) read the cache; nothing picks a SIM per
+message. The worker list shows each worker's SIM (`simLabelFor` —
+"Default SIM", the matched local SIM's label, or "SIM #n"), with "· this
+device" on the one this device is configured as.
+
+Settings still has a **"Send as worker"** dropdown to re-point an
+already-configured device at a different existing worker (e.g. after a
+reinstall, or a worker created elsewhere); it changes `workerId`, and
+the next sync then pulls that worker's `sub_id` into the cache.
+
+**The worker↔SIM binding is manual and unverified** — Android has no
+reliable way for the app to read back "what's this SIM's own phone
+number" (carrier support is inconsistent and getting more locked down
+each release), so the picker can label a SIM by slot and carrier but
+can't confirm its number matches the worker's `phone_number`. Get it
+wrong and messages send fine, just from the wrong number. One worker =
+one SIM: register each SIM's worker on the device holding that SIM. A
+dual-SIM device can act as either worker by re-registering / re-picking;
+running two workers off one device at once still isn't a thing.
 
 Every sync cycle (see below), if `workerId` is set and `SEND_SMS` is
 granted: `AdminApiClient.pullPendingSms(workerId)` claims whatever's
-queued, each message goes through `SmsSender.send()` on the default
+queued, each message goes through `SmsSender.send()` on the configured
 SIM, and the outcome is reported back with `reportSmsResult()`
 regardless of success/failure — a message that's claimed but never
 reported would stay claimed server-side forever. Each attempt logs a
@@ -139,7 +162,7 @@ Mechanics:
   `SyncService.onTaskRemoved()` (some OEMs kill services when the app
   is swiped from recents) and the crash handler below. Same
   `backgroundSyncEnabled && pullEnabled` gate as above.
-- **`SmsJustuApplication`** — installs a
+- **`SmsGokuApplication`** — installs a
   `Thread.setDefaultUncaughtExceptionHandler` that calls
   `RestartScheduler` before re-throwing to the default handler, so an
   unhandled crash anywhere in the app still leaves the sync service

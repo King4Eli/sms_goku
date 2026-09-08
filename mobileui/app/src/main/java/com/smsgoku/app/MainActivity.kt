@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import android.Manifest
 import android.content.Context
@@ -64,7 +64,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.smsjustu.app.ui.theme.SmsJustuTheme
+import com.smsgoku.app.ui.theme.SmsGokuTheme
 import kotlinx.coroutines.launch
 import android.provider.Settings as AndroidProviderSettings
 
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            SmsJustuTheme {
+            SmsGokuTheme {
                 AdminApp()
             }
         }
@@ -103,6 +103,11 @@ fun AdminApp() {
     var backgroundSyncEnabled by remember { mutableStateOf(settings.backgroundSyncEnabled) }
     var pullEnabled by remember { mutableStateOf(settings.pullEnabled) }
     var workerId by remember { mutableStateOf(settings.workerId) }
+    var subId by remember { mutableStateOf(settings.subId) }
+    // This device's own SIMs, for labelling sub_id in the worker list. Empty
+    // until READ_PHONE_STATE is granted (at worker registration); other
+    // devices' sub_ids just show as "#n".
+    val deviceSims = remember { listSims(context) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -147,6 +152,15 @@ fun AdminApp() {
             try {
                 workers = AdminApiClient(baseUrl, adminToken).listWorkers()
                 EventLog.recordPull(context, workers.size)
+                // worker_tokens.sub_id is authoritative - re-adopt this device's
+                // configured worker's SIM from the record (null -> default).
+                workers.find { it.id == workerId }?.let { mine ->
+                    val recordSubId = mine.subId ?: Settings.DEFAULT_SUB_ID
+                    if (recordSubId != subId) {
+                        subId = recordSubId
+                        settings.subId = recordSubId
+                    }
+                }
             } catch (e: Exception) {
                 snackbarHostState.showSnackbar(e.message ?: "Failed to load workers")
                 EventLog.add(context, EventType.ERROR, "Pull failed: ${e.message}")
@@ -167,7 +181,7 @@ fun AdminApp() {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("smsJustu") },
+                title = { Text("smsGoku") },
                 actions = {
                     IconButton(onClick = { refresh() }) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
@@ -288,6 +302,8 @@ fun AdminApp() {
                             items(filteredWorkers, key = { it.id }) { worker ->
                                 WorkerCard(
                                     worker = worker,
+                                    simLabel = simLabelFor(worker.subId, deviceSims),
+                                    isThisDevice = worker.id == workerId,
                                     onRevoke = { revokeTarget = worker },
                                     onShowLog = { logTarget = worker }
                                 )
@@ -332,15 +348,32 @@ fun AdminApp() {
 
     if (showCreateDialog) {
         CreateWorkerDialog(
+            initialSubId = subId,
             onDismiss = { showCreateDialog = false },
-            onCreate = { name, phone, isPublic ->
+            onCreate = { name, phone, isPublic, chosenSubId ->
                 scope.launch {
                     try {
+                        // -1 (DEFAULT_SUB_ID) -> null: store "device default SIM".
+                        val apiSubId = chosenSubId.takeIf { it >= 0 }
                         val result = AdminApiClient(baseUrl, adminToken)
-                            .createWorker(name, phone, isPublic)
+                            .createWorker(name, phone, isPublic, apiSubId)
                         showCreateDialog = false
+                        // Registering a worker from this device binds the device
+                        // to it: send as this worker, on the SIM picked here.
+                        // sub_id is now the record's (server-authoritative); the
+                        // local pref is a cache the sync re-adopts from it.
+                        workerId = result.id
+                        subId = chosenSubId
+                        settings.workerId = result.id
+                        settings.subId = chosenSubId
+                        if (ContextCompat.checkSelfPermission(
+                                context, Manifest.permission.SEND_SMS
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                        }
                         EventLog.add(context, EventType.CREATE, "Created ${result.name} (${result.phone})", result.id)
-                        snackbarHostState.showSnackbar("Created ${result.name}")
+                        snackbarHostState.showSnackbar("Created ${result.name} · sending as this worker")
                         refresh()
                     } catch (e: Exception) {
                         snackbarHostState.showSnackbar(e.message ?: "Failed to create worker")
@@ -492,7 +525,13 @@ private fun LogEventRow(event: LogEvent) {
 }
 
 @Composable
-fun WorkerCard(worker: Worker, onRevoke: () -> Unit, onShowLog: () -> Unit) {
+fun WorkerCard(
+    worker: Worker,
+    simLabel: String,
+    isThisDevice: Boolean,
+    onRevoke: () -> Unit,
+    onShowLog: () -> Unit
+) {
     val revoked = worker.revokedAt != null
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -510,6 +549,12 @@ fun WorkerCard(worker: Worker, onRevoke: () -> Unit, onShowLog: () -> Unit) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(worker.phone, style = MaterialTheme.typography.bodyMedium)
             Text("id: ${worker.id}", style = MaterialTheme.typography.bodySmall)
+            Text(
+                "SIM: $simLabel" + if (isThisDevice) " · this device" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isThisDevice) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
             worker.createdAt?.let {
                 Text("created: ${Formatting.humanDate(it)}", style = MaterialTheme.typography.bodySmall)
             }
@@ -551,6 +596,7 @@ fun SettingsDialog(
     // 'from' constraint POST /sms enforces server-side (active + public).
     val eligibleWorkers = workers.filter { it.revokedAt == null && it.isPublic }
     val selectedWorker = eligibleWorkers.find { it.id == selectedWorkerId }
+
     // Never prefilled with the stored token - write-only. Saving anything,
     // even just a new server URL, requires re-entering it (same value or a
     // new one) since there's no way to tell "left blank" apart from "clear it".
@@ -622,8 +668,8 @@ fun SettingsDialog(
                 Spacer(modifier = Modifier.height(12.dp))
                 Text("Send as worker", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "This device's own SIM must actually be that worker's number - " +
-                        "there's no way to fake the sender on a real SMS",
+                    "The SIM is bound when a worker is registered (the + button). " +
+                        "Switching here reuses whichever SIM was last set.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(modifier = Modifier.height(4.dp))
@@ -687,12 +733,29 @@ fun SettingsDialog(
 
 @Composable
 fun CreateWorkerDialog(
+    initialSubId: Int,
     onDismiss: () -> Unit,
-    onCreate: (name: String, phone: String, isPublic: Boolean) -> Unit
+    onCreate: (name: String, phone: String, isPublic: Boolean, subId: Int) -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var isPublic by remember { mutableStateOf(false) }
+
+    // The SIM this device will send this worker's messages from - the phone
+    // number above must be that SIM's own number (no way to verify it here).
+    var selectedSubId by remember { mutableStateOf(initialSubId) }
+    var simMenuExpanded by remember { mutableStateOf(false) }
+    var sims by remember { mutableStateOf(listSims(context)) }
+    val readPhoneLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            sims = listSims(context)
+            simMenuExpanded = true
+        }
+    }
+    val selectedSim = sims.find { it.subId == selectedSubId }
 
     val canSubmit = name.isNotBlank() && phone.isNotBlank()
 
@@ -724,12 +787,62 @@ fun CreateWorkerDialog(
                     Text("Public (selectable by every customer)")
                     Switch(checked = isPublic, onCheckedChange = { isPublic = it })
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("SIM to send from", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "The phone number above must be this SIM's own number. " +
+                        "Registering binds this device to send as this worker.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Box {
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            if (!hasReadPhoneState(context)) {
+                                readPhoneLauncher.launch(Manifest.permission.READ_PHONE_STATE)
+                            } else {
+                                sims = listSims(context)
+                                simMenuExpanded = true
+                            }
+                        }
+                    ) {
+                        Text(selectedSim?.label ?: "Default SIM")
+                    }
+                    DropdownMenu(
+                        expanded = simMenuExpanded,
+                        onDismissRequest = { simMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Default SIM") },
+                            onClick = {
+                                selectedSubId = Settings.DEFAULT_SUB_ID
+                                simMenuExpanded = false
+                            }
+                        )
+                        sims.forEach { sim ->
+                            DropdownMenuItem(
+                                text = { Text(sim.label) },
+                                onClick = {
+                                    selectedSubId = sim.subId
+                                    simMenuExpanded = false
+                                }
+                            )
+                        }
+                        if (sims.isEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("No SIMs detected") },
+                                enabled = false,
+                                onClick = {}
+                            )
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(
                 enabled = canSubmit,
-                onClick = { onCreate(name.trim(), phone.trim(), isPublic) }
+                onClick = { onCreate(name.trim(), phone.trim(), isPublic, selectedSubId) }
             ) { Text("Create") }
         },
         dismissButton = {

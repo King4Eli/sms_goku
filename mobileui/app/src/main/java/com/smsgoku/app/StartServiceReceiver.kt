@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import android.content.BroadcastReceiver
 import android.content.Context

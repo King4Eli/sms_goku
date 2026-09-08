@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import android.content.Context
 
@@ -31,12 +31,24 @@ class Settings(context: Context) {
             else prefs.edit().putLong(KEY_WORKER_ID, value).apply()
         }
 
+    /** SIM subscription id to send from, paired with [workerId] in Settings
+     *  (one worker = one SIM). [DEFAULT_SUB_ID] means "the system default SMS
+     *  SIM". Every send path (SmsSender, SendSmsReceiver) reads this - it is
+     *  the only place the SIM is chosen. */
+    var subId: Int
+        get() = prefs.getInt(KEY_SUB_ID, DEFAULT_SUB_ID)
+        set(value) = prefs.edit().putInt(KEY_SUB_ID, value).apply()
+
     companion object {
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_ADMIN_TOKEN = "admin_token"
         private const val KEY_BACKGROUND_SYNC = "background_sync_enabled"
         private const val KEY_PULL_ENABLED = "pull_enabled"
         private const val KEY_WORKER_ID = "worker_id"
+        private const val KEY_SUB_ID = "sub_id"
         const val DEFAULT_BASE_URL = "https://sms-gateway.q1-site.site"
+
+        /** Sentinel for "use the system default SMS subscription". */
+        const val DEFAULT_SUB_ID = -1
     }
 }

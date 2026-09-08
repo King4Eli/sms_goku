@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "com.smsjustu.app"
+    namespace = "com.smsgoku.app"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.smsjustu.app"
+        applicationId = "com.smsgoku.app"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

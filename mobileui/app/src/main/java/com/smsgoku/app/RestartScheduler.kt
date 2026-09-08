@@ -1,4 +1,4 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -7,7 +7,7 @@ import android.content.Intent
 import android.os.SystemClock
 
 object RestartScheduler {
-    const val ACTION_RESTART_SYNC = "com.smsjustu.app.action.RESTART_SYNC"
+    const val ACTION_RESTART_SYNC = "com.smsgoku.app.action.RESTART_SYNC"
 
     fun scheduleRestart(context: Context, delayMs: Long = 2_000L) {
         val settings = Settings(context)

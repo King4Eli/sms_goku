@@ -1,6 +1,6 @@
-package com.smsjustu.app
+package com.smsgoku.app
 
-class SmsJustuApplication : android.app.Application() {
+class SmsGokuApplication : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()

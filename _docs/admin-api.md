@@ -3,7 +3,7 @@
 Base URL: `/api/v1`. Implementation: `api/src/adminApi.js`. Worker
 (sender identity) management — the one thing customers can never do for
 themselves. There is no admin *account*: a single shared secret gates
-every route here. The only client is the [smsJustu mobile
+every route here. The only client is the [smsGoku mobile
 app](./worker-mobile.md) — there's no CLI or other path to register a
 worker.
 
@@ -31,7 +31,7 @@ Put it in `.env/admin.env` as `ADMIN_TOKEN=<value>`, then
 
 ## `POST /admin/workers`
 
-Body: `{ name, phone, public? }`.
+Body: `{ name, phone, public?, subId? }`.
 
 - `name` — required, any string.
 - `phone` — required, validated/normalized like `phone` in
@@ -44,14 +44,24 @@ Body: `{ name, phone, public? }`.
   only visibility control; a private worker isn't selectable by anyone
   through the customer-facing API. There's currently no other way to
   reach a worker at all — see the note on `sms_queue` below.
+- `subId` — optional non-negative integer, default `null`. The SIM
+  subscription id the registering device sends this worker's SMS from,
+  chosen in the mobileui "Register worker" dialog (`400` if present and
+  not a non-negative integer). Stored on `worker_tokens.sub_id`;
+  `null` = the device's default SMS SIM. It's device-scoped by nature
+  (a SIM enumerates differently per device) — the binding for the one
+  device holding this worker's SIM, which the app re-adopts from here
+  on each sync. The API never sends SMS itself, so it only stores and
+  echoes this.
 
-`201`: `{ id, name, phone, isPublic }`.
+`201`: `{ id, name, phone, isPublic, subId }`.
 
 ## `GET /admin/workers`
 
 Every worker.
 
-`200`: `[{ id, name, phone, isPublic, createdAt, revokedAt }, ...]`
+`200`: `[{ id, name, phone, isPublic, subId, createdAt, revokedAt }, ...]`
+(`subId` is `null` when unset).
 
 ## `PATCH /admin/workers/:id/revoke`
 
@@ -93,7 +103,7 @@ are there for a future retry policy, not read by anything yet.
 
 ## Worker device flow
 
-This pull/report pair is what the [smsJustu mobile
+This pull/report pair is what the [smsGoku mobile
 app](./worker-mobile.md) uses to actually send: a device is configured
 to act as one specific worker (its `phone_number` has to genuinely be
 that device's own SIM number, or recipients would see the wrong
