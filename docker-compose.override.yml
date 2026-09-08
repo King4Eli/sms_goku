@@ -1,14 +1,10 @@
-name: sms_justu
+name: smsgoku
 
 services:
-  api:
+  smsgoku_api:
     build:
       context: .
       dockerfile: api/Dockerfile
-    ports:
-      - "3000:3000"
 
-  frontend:
-    build: ./frontend_web
-    ports:
-      - "8080:80"
+  smsgoku_webui:
+    build: ./webui

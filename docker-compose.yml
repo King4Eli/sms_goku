@@ -1,21 +1,21 @@
-name: sms_justu
+name: smsgoku
 
 services:
-  api:
-    container_name: sms_justu_api
-    image: kingeli/sms_justu_api:1.0.0
+  smsgoku_api:
+    container_name: smsgoku_api
+    #image: kingeli/sms_justu_api:1.0.0
     restart: unless-stopped
     env_file:
       - ./.env/db.env
       - ./.env/admin.env
     ports:
-      - "10.50.0.2:9002:3000"
+      - "10.50.0.2:9002:8080"
 
-  frontend:
-    container_name: sms_justu_webui
-    image: kingeli/sms_justu_webui:1.0.0
+  smsgoku_webui:
+    container_name: smsgoku_webui
+    #image: kingeli/smsgoku_webui:1.0.0
     restart: unless-stopped
     ports:
       - "10.50.0.2:9001:80"
     depends_on:
-      - api
+      - smsgoku_api

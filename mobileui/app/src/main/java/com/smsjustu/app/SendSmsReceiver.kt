@@ -1,4 +1,4 @@
-package com.smsgoku.headless
+package com.smsjustu.app
 
 import android.app.Activity
 import android.content.BroadcastReceiver
@@ -9,10 +9,12 @@ import android.telephony.SmsManager
 import android.util.Log
 
 /**
- * Sends an SMS when triggered by a broadcast. Nothing else.
+ * adb-triggerable one-shot SMS send. Independent of the app's normal
+ * pull/report sync loop (SyncService) - it just sends whatever it's handed,
+ * so a host script can drive the device over adb (see _script/autoscript.py).
  *
  *   adb shell "am broadcast -f 0x00000020 \
- *     -n com.smsgoku.headless/.SendSmsReceiver \
+ *     -n com.smsjustu.app/.SendSmsReceiver \
  *     --es number '16505551234' \
  *     --es message 'hello from adb'"
  *
@@ -22,7 +24,11 @@ import android.util.Log
  * Optional: --ei subId <n>   (SIM subscription id for dual-SIM devices)
  *
  * One-time permission grant after install:
- *   adb shell pm grant com.smsgoku.headless android.permission.SEND_SMS
+ *   adb shell pm grant com.smsjustu.app android.permission.SEND_SMS
+ *
+ * The receiver is exported but gated by android:permission SEND_SMS in the
+ * manifest, so only callers holding SEND_SMS (the adb `shell` user, system)
+ * can trigger it.
  */
 class SendSmsReceiver : BroadcastReceiver() {
 
@@ -69,6 +75,6 @@ class SendSmsReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val TAG = "headless"
+        private const val TAG = "smsJustu"
     }
 }

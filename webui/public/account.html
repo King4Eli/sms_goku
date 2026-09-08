@@ -121,14 +121,13 @@
           result.hidden = true;
           submitBtn.disabled = true;
           try {
-            const res = await fetch("/api/v1/users/token", {
+            const { res, body } = await apiFetch("/api/v1/users/token", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ email, phone, label: label || undefined }),
             });
-            const body = await res.json();
 
-            if (res.ok) {
+            if (res.ok && body && body.apiKey) {
               setApiKey(body.apiKey);
               result.hidden = false;
               result.className = "result ok";
@@ -147,11 +146,7 @@
                 .addEventListener("click", render);
               initChrome("account");
             } else {
-              showResult(
-                result,
-                false,
-                `Error ${res.status}: ${body.error || "unknown"}`,
-              );
+              showResult(result, false, apiErrorText(res, body));
             }
           } catch (err) {
             showResult(result, false, `Request failed: ${err.message}`);
@@ -171,7 +166,7 @@
           result.hidden = true;
           submitBtn.disabled = true;
           try {
-            const res = await fetch("/api/v1/numbers", {
+            const { res } = await apiFetch("/api/v1/numbers", {
               headers: { "X-Api-Key": key },
             });
             if (res.ok) {
@@ -179,6 +174,12 @@
               showResult(result, true, "Logged in.");
               initChrome("account");
               setTimeout(render, 500);
+            } else if (res.status >= 500) {
+              showResult(
+                result,
+                false,
+                `Server error (${res.status}) - try again shortly`,
+              );
             } else {
               showResult(
                 result,

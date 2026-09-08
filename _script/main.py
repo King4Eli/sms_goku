@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""Poll the admin API for queued SMS and send them through the headless Android app.
+"""Poll the admin API for queued SMS and send them through the mobileui Android app.
 
 Acts as one worker device: every POLL_INTERVAL seconds it claims pending messages
 for WORKER_ID via `GET /api/v1/admin/sms/pending`, sends each one by broadcasting
-to `com.smsgoku.headless/.SendSmsReceiver` over adb, then closes the loop with
+to `com.smsjustu.app/.SendSmsReceiver` over adb, then closes the loop with
 `PATCH /api/v1/admin/sms/:id/report`.
+
+The receiver is the mobileui app's SendSmsReceiver (see
+mobileui/app/src/main/java/com/smsjustu/app/SendSmsReceiver.kt) - install that
+app and grant it SEND_SMS, no other setup or the sync loop needed.
 
 Config comes from CLI flags or the matching env vars:
 
@@ -13,7 +17,7 @@ Config comes from CLI flags or the matching env vars:
     WORKER_ID      worker_tokens.id to pull for   (--worker-id)
     POLL_INTERVAL  seconds between polls, def 6.7  (--interval)
     ADB_SERIAL     target a specific adb device   (--adb-serial)
-    PKG            headless app package            (--package)
+    PKG            app package                     (--package)
 
 Stdlib only. Ctrl-C to stop.
 """
@@ -32,7 +36,7 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_PKG = "com.smsgoku.headless"
+DEFAULT_PKG = "com.smsjustu.app"
 DEFAULT_INTERVAL = 6.7
 PULL_LIMIT = 20
 # FLAG_INCLUDE_STOPPED_PACKAGES — needed for the first broadcast after the app is
@@ -103,7 +107,7 @@ def report(api_base: str, token: str, msg_id: int, error: str | None) -> None:
 # --- SMS via adb ---------------------------------------------------------------
 
 def send_sms(adb_base: list[str], pkg: str, number: str, message: str) -> tuple[bool, str]:
-    """Broadcast one SMS to the headless receiver. Returns (ok, detail)."""
+    """Broadcast one SMS to the app's SendSmsReceiver. Returns (ok, detail)."""
     inner = (
         f"am broadcast -f {BROADCAST_FLAG} "
         f"-n {pkg}/.SendSmsReceiver "

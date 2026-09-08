@@ -21,19 +21,33 @@ function isLoggedIn() {
 }
 
 // Attaches X-Api-Key automatically; throws with a readable message on
-// network failure so callers can just try/catch and show it.
+// network failure so callers can just try/catch and show it. `body` is the
+// parsed JSON, or null when the response isn't JSON at all (proxy 502/504
+// HTML, empty body, a crashed API) - callers must treat null as failure
+// rather than reaching into it.
 async function apiFetch(path, options = {}) {
   const headers = Object.assign({}, options.headers);
   const apiKey = getApiKey();
-  if (apiKey) headers["X-Api-Key"] = apiKey;
+  if (apiKey && !headers["X-Api-Key"]) headers["X-Api-Key"] = apiKey;
   const res = await fetch(path, Object.assign({}, options, { headers }));
   let body = null;
-  try {
-    body = await res.json();
-  } catch {
-    body = null;
+  const text = await res.text().catch(() => "");
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = null;
+    }
   }
   return { res, body };
+}
+
+// Turns an apiFetch result into a user-facing message for the failure case.
+function apiErrorText(res, body) {
+  if (body && body.error) return `Error ${res.status}: ${body.error}`;
+  if (res.status >= 500) return `Server error (${res.status}) - try again shortly`;
+  if (!body) return `Unexpected response (${res.status}) - the server may be down`;
+  return `Error ${res.status}`;
 }
 
 function maskKey(key) {

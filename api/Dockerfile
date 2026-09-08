@@ -9,10 +9,10 @@ COPY api/package.json api/package-lock.json* ./api/
 RUN npm install --prefix api --omit=dev --no-audit --no-fund
 
 COPY api/src ./api/src
-COPY api/scripts ./api/scripts
-COPY _docs/schema.sql ./_docs/schema.sql
+# COPY api/scripts ./api/scripts
+# COPY _docs/schema.sql ./_docs/schema.sql
 
 WORKDIR /app/api
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["node", "src/server.js"]

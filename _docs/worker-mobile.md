@@ -1,6 +1,6 @@
 # smsJustu (mobile)
 
-Android app at `frontend_worker_mobile/`. Package
+Android app at `mobileui/`. Package
 `com.smsjustu.app`, app label "smsJustu". A client for the
 [Admin API](./admin-api.md): it manages worker records (sender
 identities customers can pick as `from`; create/list/revoke) and,
@@ -32,6 +32,13 @@ option here).
   default SIM, splitting into multipart if needed, and resolves once
   every part's sent-broadcast has come back (success or a specific
   `SmsManager.RESULT_ERROR_*`).
+- `SendSmsReceiver.kt` — an exported, `SEND_SMS`-gated `BroadcastReceiver`
+  for one-shot sends driven by a host script over adb
+  (`am broadcast -n com.smsjustu.app/.SendSmsReceiver --es number … --es
+  message …`, optional `--ei subId <n>`). Independent of the sync loop:
+  it sends what it's handed and reports the outcome as the ordered-
+  broadcast result. Used by `_script/autoscript.py`; see
+  [`how-to-headless.txt`](./how-to-headless.txt).
 
 ## Setup
 
@@ -39,7 +46,7 @@ On first launch (or whenever the admin token is blank) a Settings
 dialog opens automatically:
 
 - **Server URL** — defaults to `https://sms-gateway.q1-site.site`;
-  point it at `http://10.0.2.2:3000` from an emulator to hit a host
+  point it at `http://10.0.2.2:8080` from an emulator to hit a host
   machine's `docker compose` API.
 - **X-Admin-Token** — the same value as `ADMIN_TOKEN` in
   `.env/admin.env`. Without it every `/admin/*` call 401s (or 503s if
@@ -154,7 +161,7 @@ a force-stop is enough to restore normal boot-start behavior.
 ## Building / installing
 
 ```bash
-cd frontend_worker_mobile
+cd mobileui
 ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```

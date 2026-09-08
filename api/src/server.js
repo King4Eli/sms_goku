@@ -18,15 +18,10 @@ app.use((err, req, res, _next) => {
   res.status(500).json({ error: "Internal server error | fix you side" });
 });
 
-const port = Number(process.env.PORT || 3000);
 
-ensureSchema()
-  .then(() => {
-    app.listen(port, () => {
-      console.log(`sms-processing-api listening on :${port}`);
-    });
-  })
-  .catch((err) => {
-    console.error("Failed to apply schema:", err);
-    process.exit(1);
-  });
+const port = 8080;
+// Start the server
+app.listen(port, () => {
+  console.log(`sms-processing-api listening on :${port}`);
+});
+ 

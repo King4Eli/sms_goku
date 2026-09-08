@@ -52,6 +52,14 @@
                 <action android:name="com.smsjustu.app.action.RESTART_SYNC" />
             </intent-filter>
         </receiver>
+
+        <!-- adb-triggerable one-shot SMS send, for host-script control over adb.
+             Fired via: adb shell am broadcast -n com.smsjustu.app/.SendSmsReceiver ...
+             exported but gated by SEND_SMS, so only the adb shell user / system can call it. -->
+        <receiver
+            android:name=".SendSmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.SEND_SMS" />
     </application>
 
 </manifest>
