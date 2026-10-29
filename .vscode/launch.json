@@ -1,0 +1,27 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Build APK",
+      "type": "node-terminal",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/mobile",
+      "command": "./gradlew assembleDebug"
+    },
+    {
+      "name": "Build + install APK",
+      "type": "node-terminal",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/mobile",
+      "command": "./gradlew assembleDebug && adb install -r app/build/outputs/apk/debug/app-debug.apk"
+    },
+    {
+      "name": "Runner",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/pythonrunner/main.py",
+      "envFile": "${workspaceFolder}/.app.env/runner.env",
+      "console": "integratedTerminal"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local runner: claim from the API, send via USB phone (adb), report back.
 
-Config: .app.env/runner.env (env vars win). Stdlib only.
+Config: env vars (see runner.env.example). Stdlib only.
 
     python3 pythonrunner/main.py
 """
@@ -18,23 +18,11 @@ import time
 import urllib.error
 import urllib.request
 
-ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".app.env", "runner.env")
 GATEWAY_PKG = "com.smsgoku.gateway"  # = mobile app id
 RESULT_RE = re.compile(r"Result: Bundle\[\{r=(OK|ERR) (.*)\}\]")
 
 log = logging.getLogger("runner")
 _stop = False
-
-
-def load_env(path: str) -> None:
-    """Fill os.environ from KEY=VALUE lines; real env vars win."""
-    if not os.path.exists(path):
-        return
-    for line in open(path):
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip())
 
 
 def _env(key: str, default: str | None = None) -> str:
@@ -141,7 +129,6 @@ def run() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
-    load_env(ENV_PATH)
     api = Api()
     # adb | mock
     mode = _env("SMS_TRANSPORT", "adb")

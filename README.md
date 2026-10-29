@@ -29,12 +29,13 @@ Local (phone on USB):
 ```bash
 cp .app.env/runner.env.example .app.env/runner.env   # API_URL, RUNNER_TOKEN (= api.env)
 adb devices                                          # phone = "device"
+set -a; . runner.env; set +a                # load into env
 python3 pythonrunner/main.py
 ```
 
 - Simulator: http://<vps>:9161 (key = `DEMO_API_KEY`)
 - Docs: http://<vps>:9160/docs
-- No phone: `SMS_TRANSPORT=mock` in `runner.env` (numbers ending in 0 fail)
+- No phone: `SMS_TRANSPORT=mock python3 pythonrunner/main.py` (numbers ending in 0 fail)
 
 ## Phone setup
 
