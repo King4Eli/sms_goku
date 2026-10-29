@@ -1,0 +1,10 @@
+name: sms_goku
+
+services:
+  api:
+    ports: !override
+      - "10.50.0.1:9060:8000"
+
+  web:
+    ports: !override
+      - "10.50.0.1:9061:80"
