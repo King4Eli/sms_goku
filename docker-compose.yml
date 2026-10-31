@@ -6,8 +6,6 @@ services:
     build: ./api
     container_name: sms_goku_api
     env_file: [.app.env/db.env, .app.env/api.env]
-    depends_on:
-      db: { condition: service_healthy }
     ports:
       - "10.50.0.1:9060:8000"
     healthcheck:
@@ -16,7 +14,6 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
-    networks: [sms_goku]
 
   web:
     image: ghcr.io/king4eli/sms_goku/web:${IMAGE_TAG:-latest}
@@ -26,4 +23,3 @@ services:
     ports:
       - "10.50.0.1:9061:80"
     restart: unless-stopped
-    networks: [sms_goku]

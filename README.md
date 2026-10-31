@@ -21,6 +21,7 @@ VPS:
 
 ```bash
 for f in db api; do cp .app.env/$f.env.example .app.env/$f.env; done   # fill in
+docker compose -f postgres.yml up -d    # db, once
 docker compose up -d --build
 ```
 
