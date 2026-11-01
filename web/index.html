@@ -39,6 +39,10 @@
   .table-wrap { overflow-x: auto; }
   .st { font-weight: 600; }
   .st.sent { color: var(--ok); } .st.queued, .st.sending { color: var(--warn); } .st.failed { color: var(--bad); }
+  .newkey { margin-top:12px; padding:12px; border:1px solid var(--warn); border-radius:8px; }
+  .newkey p { margin:0 0 6px; font-size:13px; color:var(--warn); }
+  .newkey code { display:block; font: 13px ui-monospace, monospace; overflow-wrap:anywhere; }
+  button.danger { margin:0; padding:4px 10px; background:transparent; color:var(--bad); border:1px solid var(--line); }
   .stats { display:flex; gap:16px; font-size:13px; color:var(--muted); margin-bottom:8px; flex-wrap: wrap; }
 </style>
 </head>
@@ -87,6 +91,30 @@
       </table>
     </div>
   </section>
+
+  <section class="card" style="margin-top:16px">
+    <h2>API keys (admin)</h2>
+    <label for="admin">Admin token (X-Admin-Token)</label>
+    <input id="admin" type="password" placeholder="ADMIN_TOKEN from api.env" autocomplete="off">
+    <div class="row" style="align-items:flex-end">
+      <div><label for="keyname">New key name</label><input id="keyname" placeholder="my-app"></div>
+      <button id="create" style="flex:0 0 auto">Create key</button>
+    </div>
+    <div id="newkey" class="newkey" hidden>
+      <p>Copy this key now. It is not shown again.</p>
+      <code id="newkeyval"></code>
+      <div class="row">
+        <button class="secondary" id="copykey" style="flex:0 0 auto">Copy</button>
+        <button class="secondary" id="usekey" style="flex:0 0 auto">Use in simulator</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-top:12px">
+      <table>
+        <thead><tr><th>ID</th><th>Name</th><th>Prefix</th><th>Status</th><th>Created</th><th></th></tr></thead>
+        <tbody id="keys"><tr><td colspan="6">Enter the admin token to manage keys.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
 </main>
 
 <script>
@@ -101,10 +129,10 @@ function log(line) {
   el.textContent = `${new Date().toLocaleTimeString()} ${line}\n` + el.textContent;
 }
 
-async function api(method, path, body) {
+async function api(method, path, body, auth = { "X-API-Key": $("key").value.trim() }) {
   const r = await fetch(path, {
     method,
-    headers: { "X-API-Key": $("key").value.trim(), ...(body ? { "Content-Type": "application/json" } : {}) },
+    headers: { ...auth, ...(body ? { "Content-Type": "application/json" } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await r.json().catch(() => ({}));
@@ -173,6 +201,60 @@ async function load() {
 $("refresh").onclick = load;
 load();
 setInterval(load, 3000);
+
+// ---------- admin: API keys ----------
+// admin token kept for this tab only
+const session = { get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+                  set(k, v) { try { sessionStorage.setItem(k, v); } catch {} } };
+$("admin").value = session.get("adminToken") || "";
+$("admin").addEventListener("change", () => { session.set("adminToken", $("admin").value.trim()); loadKeys(); });
+const admin = (method, path, body) => api(method, path, body, { "X-Admin-Token": $("admin").value.trim() });
+
+async function loadKeys() {
+  if (!$("admin").value.trim()) return;
+  try {
+    const keys = await admin("GET", "/api/admin/keys");
+    $("keys").innerHTML = keys.length ? keys.map((k) => `<tr>
+      <td>${k.id}</td><td>${esc(k.name)}</td><td><code>${esc(k.prefix)}…</code></td>
+      <td class="st ${k.active ? "sent" : "failed"}">${k.active ? "active" : "revoked"}</td>
+      <td>${new Date(k.created_at).toLocaleString()}</td>
+      <td>${k.active ? `<button class="danger" data-revoke="${k.id}" data-name="${esc(k.name)}">Revoke</button>` : ""}</td>
+      </tr>`).join("") : `<tr><td colspan="6">No keys yet.</td></tr>`;
+  } catch (e) {
+    $("keys").innerHTML = `<tr><td colspan="6">${esc(e.message)}</td></tr>`;
+  }
+}
+
+$("create").onclick = async () => {
+  const name = $("keyname").value.trim();
+  if (!name) return alert("Enter a key name.");
+  $("create").disabled = true;
+  try {
+    const k = await admin("POST", "/api/admin/keys", { name });
+    $("newkeyval").textContent = k.api_key;
+    $("newkey").hidden = false;
+    $("keyname").value = "";
+    loadKeys();
+  } catch (e) { alert(e.message); }
+  finally { $("create").disabled = false; }
+};
+
+$("copykey").onclick = () => navigator.clipboard?.writeText($("newkeyval").textContent);
+$("usekey").onclick = () => {
+  $("key").value = $("newkeyval").textContent;
+  store.set("apiKey", $("key").value);
+  load();
+};
+
+$("keys").onclick = async (e) => {
+  const b = e.target.closest("[data-revoke]");
+  if (!b || !confirm(`Revoke key "${b.dataset.name}"? Apps using it stop working.`)) return;
+  b.disabled = true;
+  try { await admin("DELETE", `/api/admin/keys/${b.dataset.revoke}`); loadKeys(); }
+  catch (err) { alert(err.message); b.disabled = false; }
+};
+
+loadKeys();
 </script>
 </body>
 </html>
