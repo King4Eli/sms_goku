@@ -10,7 +10,7 @@ def _env(key: str, default: str | None = None) -> str:
 
 
 DATABASE_URL = (f"postgresql+psycopg://{quote(_env('POSTGRES_USER'))}:{quote(_env('POSTGRES_PASSWORD'))}"
-                f"@{_env('DB_HOST', 'db:5432')}/{_env('POSTGRES_DB')}")
+                f"@{_env('DB_HOST', 'db')}:{_env('DB_PORT', '5432')}/{_env('POSTGRES_DB')}")
 ADMIN_TOKEN = _env("ADMIN_TOKEN")
 # X-Runner-Token for /api/runner/*
 RUNNER_TOKEN = _env("RUNNER_TOKEN")
